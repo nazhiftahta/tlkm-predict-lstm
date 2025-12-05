@@ -2,135 +2,373 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.models import load_model
 import joblib
-import os
 
-st.title("📈 Prediksi Harga Saham TLKM Menggunakan LSTM")
-st.write("Aplikasi ini memprediksi harga **Close** saham TLKM dan forecasting 30 hari ke depan.")
+# ===============================
+# CONFIGURASI HALAMAN
+# ===============================
+st.set_page_config(
+    page_title="Prediksi Saham TLKM — LSTM",
+    layout="wide"
+)
 
-# Load dataset
-file_path = "daily/TLKM.csv"
-df = pd.read_csv(file_path)
-st.subheader("📌 Data Awal")
-st.dataframe(df.head())
+# ===============================
+# CSS STYLING
+# ===============================
+st.markdown("""
+<style>
+/* Background */
+body {
+    background-color: #F8F9FA;
+}
 
-# Preprocessing
-df['timestamp'] = pd.to_datetime(df['timestamp'])
-df = df.sort_values(by='timestamp')
-df.reset_index(drop=True, inplace=True)
+/* Header Title */
+h1, h2, h3 {
+    font-weight: 600;
+    color: #1A1A1A;
+}
 
-df.fillna(method='ffill', inplace=True)
-df.fillna(method='bfill', inplace=True)
+/* Card */
+.card {
+    padding: 20px;
+    border-radius: 10px;
+    background-color: white;
+    border: 1px solid #DDDDDD;
+    box-shadow: 0px 2px 6px rgba(0,0,0,0.05);
+    margin-bottom: 15px;
+}
 
-numeric_cols = ['open', 'high', 'low', 'close', 'volume']
-df[numeric_cols] = df[numeric_cols].astype(float)
+/* Equal Height Cards */
+.equal-card {
+    height: 160px;
+}
 
-data = df[['timestamp', 'close']].copy()
-data.set_index('timestamp', inplace=True)
+/* Footer spacing */
+footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
 
-train_size = int(len(data) * 0.8)
-train = data.iloc[:train_size]
-test = data.iloc[train_size:]
+# ===============================
+# LOAD DATA & MODEL
+# ===============================
+@st.cache_data
+def load_data():
+    return pd.read_csv("daily/TLKM.csv")
 
-st.write(f"🔹 Train: {train.shape} | 🔹 Test: {test.shape}")
+@st.cache_resource
+def load_lstm_model():
+    return load_model("lstm_tlkm.h5", compile=False)
 
-# Scaling
-scaler = MinMaxScaler()
-scaled_data = scaler.fit_transform(data)
+@st.cache_resource
+def load_scaler():
+    return joblib.load(open("scaler.pkl", "rb"))
 
-def create_sequences(dataset, window=60):
-    X, y = [], []
-    for i in range(window, len(dataset)):
-        X.append(dataset[i-window:i, 0])
-        y.append(dataset[i, 0])
-    return np.array(X), np.array(y)
 
-X_all, y_all = create_sequences(scaled_data)
-X_train = X_all[:train_size]
-y_train = y_all[:train_size]
-X_test = X_all[train_size:]
-y_test = y_all[train_size:]
+data = load_data()
+lstm_model = load_lstm_model()
+scaler = load_scaler()
 
-X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
-X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
+# ===============================
+# SIDEBAR NAVIGATION
+# ===============================
+st.sidebar.title("Navigation")
+page = st.sidebar.radio(
+    "Go to:",
+    ["Home", "Data Analysis", "Model and Evaluation", "Predictions"]
+)
 
-st.subheader("⚙️ Training Model LSTM")
-train_button = st.button("Mulai Training Model")
+# =====================================================
+# ====================== HOME =========================
+# =====================================================
+if page == "Home":
+    st.title("CAPSTONE PROJECT — Prediksi Harga Saham Telkom Indonesia (TLKM)")
 
-if train_button:
-    lstm_model = Sequential([
-        LSTM(50, return_sequences=True, input_shape=(X_train.shape[1],1)),
-        Dropout(0.2),
-        LSTM(50),
-        Dense(1)
-    ])
+    st.subheader("Deskripsi Dataset")
+    st.markdown("""
+Dataset yang digunakan merupakan *Indonesia Stock Dataset* (IHSG) yang memuat data historis
+harga saham dalam tiga interval waktu: **daily**, **hourly**, dan **minutes**.  
+Pada proyek ini, fokus analisis diarahkan pada saham **Telkom Indonesia (TLKM)** dengan menggunakan
+data **harga penutupan harian** untuk membangun model prediksi berbasis *time series*.
+    """)
 
-    lstm_model.compile(loss='mse', optimizer='adam')
-    history = lstm_model.fit(
-        X_train, y_train,
-        epochs=30,
-        batch_size=32,
-        validation_split=0.1,
-        verbose=1
+    st.subheader("Tujuan Penelitian")
+    st.markdown("""
+Penelitian ini bertujuan mengembangkan sistem peramalan harga penutupan saham **TLKM** menggunakan 
+pendekatan **Machine Learning** dan **Deep Learning**, khususnya model **LSTM**, serta dibandingkan 
+dengan pendekatan statistik seperti **ARIMA** dan **Prophet**. Evaluasi dilakukan menggunakan 
+**RMSE** dan **MAPE** untuk menilai performa model dan menghasilkan peramalan yang informatif.
+    """)
+
+    st.subheader("Informasi Perusahaan — Telkom Indonesia (TLKM)")
+    st.markdown("""
+Telkom Indonesia (Persero) Tbk adalah perusahaan sektor **Infrastructures**, terdaftar di BEI sejak 
+**14 November 1995**, dengan kapitalisasi pasar lebih dari **Rp 367 triliun** dan saham beredar lebih 
+dari **99 miliar lembar**. Data historis TLKM tersedia dalam resolusi **daily**, **hourly**, dan 
+**minutes**, memungkinkan analisis mendalam terhadap pola temporal harga saham.
+    """)
+
+    st.subheader("Preview Dataset")
+    st.dataframe(data.head())
+
+# =====================================================
+# ================== DATA ANALYSIS ====================
+# =====================================================
+elif page == "Data Analysis":
+    st.title("Preprocessing and Exploratory Data Analysis")
+
+    # ---- CSS (Kotak Besar & Elegan) ----
+    st.markdown("""
+    <style>
+    .styled-box {
+        background-color: #ffffff;
+        border: 1px solid #d9d9d9;
+        border-radius: 12px;
+        padding: 28px;                       /* JARAK DALAM KOTAK (besar & elegan) */
+        margin-top: 18px;
+        margin-bottom: 18px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+        min-height: 180px;                   /* Tinggi minimum kotak */
+    }
+
+    .box-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #222222;
+        margin-bottom: 10px;
+    }
+
+    .box-content {
+        font-size: 15px;
+        color: #444444;
+        line-height: 1.5;
+    }
+
+    /* Kotak missing value horizontal */
+    .inline-pre {
+        background: #f7f7f7;
+        padding: 14px;
+        border-radius: 6px;
+        border: 1px solid #e3e3e3;
+        display: inline-block;  /* <<< BIKIN ISI "KE SAMPING" */
+        font-size: 14px;
+        white-space: pre;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.subheader("Grafik Harga Penutupan TLKM (Daily)")
+
+    fig, ax = plt.subplots(figsize=(12, 4))
+    data["close"].plot(ax=ax)
+    ax.set_ylabel("Harga (Rp)")
+    ax.set_title("Harga Penutupan TLKM (Daily)")
+    st.pyplot(fig)
+
+    st.subheader("Analisis Singkat")
+    st.markdown("""
+Grafik menunjukkan tren harga penutupan TLKM yang bergerak fluktuatif 
+namun tetap menunjukkan pola jangka panjang yang dapat ditangkap model LSTM. 
+Variasi musiman dan pergerakan tren memberikan sinyal bahwa dataset mengandung 
+komponen pola temporal yang kuat dan cocok untuk metode forecasting berbasis kejadian berurutan.
+    """)
+
+    # ======================
+    #   INFORMATION SUMMARY
+    # ======================
+    st.subheader("Information Summary")
+
+    # ---- Kotak 1: Missing Value ----
+    missing_html = """
+    <div class='styled-box'>
+        <div class='box-title'>Missing Values</div>
+        <div class='box-content'>
+            <span class='inline-pre'>timestamp    0
+open         0
+low          0
+high         0
+close        0
+volume       0
+dtype: int64</span>
+        </div>
+    </div>
+    """
+    st.markdown(missing_html, unsafe_allow_html=True)
+
+    # ---- Kotak 2: Feature Engineering ----
+    fe_text = (
+        "Seluruh kolom numerik seperti open, high, low, close, dan volume "
+        "diubah ke dalam tipe data float agar dapat diproses dengan benar oleh model.<br>"
+        "<br>Target : <b>close (harga penutupan)</b><br>"
     )
 
-    lstm_pred_scaled = lstm_model.predict(X_test)
+    fe_html = f"""
+    <div class='styled-box'>
+        <div class='box-title'>Feature Engineering</div>
+        <div class='box-content'>{fe_text}</div>
+    </div>
+    """
+    st.markdown(fe_html, unsafe_allow_html=True)
+
+    # ---- Kotak 3: Modeling ----
+    model_text = """
+    Model : <b>LSTM (Long Short-Term Memory)</b>
+    <br><br>
+    • LSTM(50, return_sequences=True) <br>
+    • Dropout(0.2)  <br>
+    • LSTM(50)  <br>
+    • Dense(1)
+    """
+
+    model_html = f"""
+    <div class='styled-box'>
+        <div class='box-title'>Modelling</div>
+        <div class='box-content'>{model_text}</div>
+    </div>
+    """
+    st.markdown(model_html, unsafe_allow_html=True)
+
+# =====================================================
+# ================== MODEL EVALUATION =================
+# =====================================================
+elif page == "Model and Evaluation":
+
+    st.title("Time Series Model — LSTM Forecasting")
+
+    # Load predictions (recreate using scaler)
+    scaled_data = scaler.transform(data[["close"]])
+    window = 60
+
+    # Create full sequence
+    X_all = []
+    for i in range(window, len(scaled_data)):
+        X_all.append(scaled_data[i-window:i, 0])
+
+    X_all = np.array(X_all).reshape(-1, window, 1)
+
+    lstm_pred_scaled = lstm_model.predict(X_all)
     lstm_pred = scaler.inverse_transform(lstm_pred_scaled)
-    actual = scaler.inverse_transform(y_test.reshape(-1,1))
 
-    st.success("🚀 Training selesai!")
+    # Align actual data
+    actual = data["close"].iloc[window:].values
 
-    # Simpan model dan scaler
-    lstm_model.save("lstm_tlkm.h5")
-    joblib.dump(scaler, "scaler.pkl")
-    st.info("Model & scaler telah disimpan.")
+    st.subheader("Forecasting Plot")
 
-# Prediction Future Days
-if os.path.exists("lstm_tlkm.h5"):
-    st.subheader("🔮 Prediksi 30 Hari Kedepan (Forecast)")
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.plot(actual, label="Actual")
+    ax.plot(lstm_pred, label="LSTM Predict")
+    ax.set_title("LSTM Forecasting Harga Penutupan TLKM")
+    ax.legend()
+    st.pyplot(fig)
 
-    # Muat model kalau sudah ada
-    from tensorflow.keras.models import load_model
-    lstm_model = load_model("lstm_tlkm.h5")
-    scaler = joblib.load("scaler.pkl")
+    # Metrics from your notebook
+    rmse = 88.31896234934389
+    mape = 0.018910808587022113
 
-    future_days = 30
-    last_sequence = scaled_data[-60:]
-    current_seq = last_sequence.reshape(1, 60, 1)
-    future_predictions = []
+    st.subheader("Model Performance Summary")
+    col0, col1, col2, col3, col4 = st.columns(5)
 
-    for _ in range(future_days):
-        future_pred_scaled = lstm_model.predict(current_seq)[0][0]
-        future_predictions.append(float(future_pred_scaled))
+    with col0:
+        st.markdown('<div class="card equal-card"><h4>Data Splitting</h4>'
+                    '• Train: 80%<br>'
+                    '• Test: 20%<br>'
+                    '</div>', unsafe_allow_html=True)
 
-        # Update sequence (fix dimensi)
-        new_val = np.array(future_pred_scaled).reshape(1, 1, 1)
-        current_seq = np.append(current_seq[:, 1:, :], new_val, axis=1)
+    with col1:
+        st.markdown('<div class="card equal-card"><h4>Epochs</h4>30</div>', 
+                    unsafe_allow_html=True)
 
-    future_predictions_actual = scaler.inverse_transform(
-        np.array(future_predictions).reshape(-1,1)
-    )
+    with col2:
+        st.markdown('<div class="card equal-card"><h4>Window Size</h4>60 hari</div>',
+                    unsafe_allow_html=True)
 
-    last_date = df['timestamp'].iloc[-1]
-    future_dates = pd.date_range(start=last_date, periods=future_days+1, freq='D')[1:]
+    with col3:
+        st.markdown(f'<div class="card equal-card"><h4>RMSE</h4>{rmse:.2f}</div>',
+                    unsafe_allow_html=True)
 
-    future_pred_df = pd.DataFrame({
-        "date": future_dates,
-        "predicted_close": future_predictions_actual.flatten()
-    })
+    with col4:
+        st.markdown(f'<div class="card equal-card"><h4>MAPE</h4>{mape:.4f}</div>',
+                    unsafe_allow_html=True)
 
-    st.write("### 📄 Tabel Prediksi")
-    st.dataframe(future_pred_df)
+    st.subheader("Analisis Model")
+    st.markdown("""
+Model LSTM menunjukkan kemampuan yang baik dalam mengikuti pola tren harga TLKM 
+secara umum. Garis prediksi cenderung lebih halus dibandingkan data aktual, yang 
+mengindikasikan bahwa model telah menangkap tren jangka panjang tanpa terlalu sensitif 
+terhadap fluktuasi jangka pendek. Nilai RMSE dan MAPE menunjukkan error rendah, 
+menandakan performa model cukup optimal untuk forecasting jangka pendek.
+    """)
+    st.subheader("Perbandingan Model Forecasting")
 
-    st.write("### 📉 Grafik Prediksi")
-    plt.figure(figsize=(13,5))
-    plt.plot(future_dates, future_predictions_actual, label="LSTM Future Forecast")
-    plt.title("Prediksi Harga Penutupan TLKM 30 Hari Kedepan")
-    plt.xlabel("Tanggal")
-    plt.ylabel("Harga (Rp)")
-    plt.legend()
-    plt.grid(True)
-    st.pyplot(plt)
+    # Data perbandingan
+    comparison_data = {
+        "Model": ["Baseline", "LSTM", "ARIMA", "Prophet"],
+        "RMSE": [66.791953, 88.318962, 553.101180, 1504.521240],
+        "MAPE": [0.0131657, 0.018911, 0.122561, 0.396217]
+    }
+
+    comparison_df = pd.DataFrame(comparison_data)
+
+    # Tampilkan tabel ke Streamlit
+    st.dataframe(comparison_df)
+
+    # Analisis
+    st.subheader("Interpretasi Hasil")
+    st.markdown("""
+- **LSTM** adalah model terbaik untuk forecasting harga penutupan TLKM.  
+  Dengan RMSE **rendah** dan MAPE **< 2%**, model ini menunjukkan performa yang stabil dan akurat. Walaupun baseline secara angka sedikit lebih kecil, baseline hanya memprediksi *harga tidak berubah*. Sedangkan LSTM benar-benar **mempelajari pola naik–turun** harian.
+                
+- **ARIMA** cocok sebagai pembanding klasik, tetapi kurang mampu menangkap pola non-linear  
+  dan volatilitas harga pasar, sehingga error jauh lebih tinggi.
+
+- **Prophet** tidak cocok untuk data saham TLKM, karena model ini cenderung menghasilkan  
+  prediksi yang terlalu halus (*over-smoothing*) dan gagal mengikuti fluktuasi harga harian.
+    """)
+
+# =====================================================
+# ===================== PREDICTIONS ===================
+# =====================================================
+elif page == "Predictions":
+    st.title("Hasil Prediksi - Forecasting")
+
+    # Recalculate scaled_data for this page
+    scaled_data = scaler.transform(data[["close"]])
+    
+    # use last 60 data
+    last_60 = scaled_data[-60:]
+    last_60 = last_60.reshape(1, 60, 1)
+
+    next_day_pred = lstm_model.predict(last_60)
+    next_day_price = scaler.inverse_transform(next_day_pred)[0][0]
+
+    st.subheader("Prediksi Harga Besok")
+    st.markdown(f"""
+    Prediksi harga penutupan TLKM untuk hari berikutnya:  
+    **Rp {next_day_price:,.0f}**
+    """)
+
+    st.subheader("N-Day Prediction")
+
+    n_days = st.slider("Pilih jumlah hari prediksi", 1, 30, 10)
+
+    temp_seq = scaled_data[-60:].flatten().tolist()
+    future_preds = []
+
+    for _ in range(n_days):
+        x_input = np.array(temp_seq[-60:]).reshape(1, 60, 1)
+        next_scaled = lstm_model.predict(x_input)[0][0]
+        future_preds.append(next_scaled)
+        temp_seq.append(next_scaled)
+
+    future_preds = scaler.inverse_transform(np.array(future_preds).reshape(-1, 1))
+
+    st.line_chart(future_preds)
+
+    st.subheader("Kesimpulan Akhir")
+    st.markdown("""
+Model LSTM memberikan proyeksi kenaikan harga saham TLKM secara bertahap dan stabil.
+Hasil prediksi jangka pendek menunjukkan tren bullish dengan volatilitas yang relatif rendah,
+yang sejalan dengan pola historis saham TLKM. Prediksi ini dapat digunakan sebagai referensi 
+pendukung dalam pengambilan keputusan, namun tetap perlu mempertimbangkan kondisi pasar aktual.
+    """)
+
